@@ -1,8 +1,9 @@
 ---
-title: "Practical Machine Learning Class Assignment"
+title: "Practical Machine Learning Course Project"
 author: "VXG"
 date: "4/24/2021"
-output: html_document
+output: 
+    bookdown::html_document2
 ---
 
 ```{r setup, include=FALSE}
@@ -18,6 +19,8 @@ library(caret)
 library(dplyr)
 library(ggplot2)
 library(rapportools)
+library(VIM)
+library(rattle)
 
 ```
 
@@ -48,101 +51,145 @@ if (!exists("test", inherits = FALSE)) {
 
 ```
 
-Since the Caret algorithms require complete observations without NAs, we need to understand how much data are missing in each variable. 
+## Cleaning Data
 
-```{r cleaning data}
+We first examine how much data are missing from the datasets. The left plots show that large number of columns are missing more than 80% of data. The bottom half of the right plot shows that the missingness all occurs in the same rows, whereas the top half shows that only very few number of rows have no missing data.  
 
-# #check whehter NAs exist in each variable of the train data.
-# detect_NA <- lapply(train, is.na)
-# 
-# #count how many NAs there are in each variable of the train data
-# count_NA <- data.frame(sapply(detect_NA, sum))
-# 
-# #check whehter empty cells exist in each variable of the train data.
-# detect_empty <- lapply(train, is.empty)
-# 
-# #count how many NAs there are in each variable of the train data
-# count_empty <- data.frame(sapply(detect_empty, sum))
-# 
-# #merge both to evaluate the missingness. 
-# missingness <- merge(count_NA, count_empty, by = 0)
+```{r plotmissing}
+
+aggr(train)
+
 
 ```
 
-The missingness summary reveals the variables that include predominantly NAs and thus should be excluded from the modeling process, and the variables that needs imputation due to its partial missingness.
+
+### Exclude columns that are largely NAs or empty 
+
+Since the Caret algorithms require complete observations without NAs, we need to remove the variables that are largely empty.  
 
 ```{r removeNA}
 
-#remove the groups of variables that are largely NAs.
-train_s <- select(train, -starts_with(c("amplitude_", "avg_", "max_", "min_", "stddev_", "var_")), -c("X", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp"))
+#count how many NAs or empty values there are in each column. 
+missingness_byCol <- colSums(is.na(train) | train == "") #this returns a numeric vector of 160 numbers, each represent a missingness count for corresponding column. 
 
-#a small number of variables from these groups are not NAs. We'd need to add them back. 
-train_o <- select(train, c(amplitude_yaw_belt, amplitude_yaw_dumbbell, amplitude_yaw_forearm, max_yaw_belt, max_yaw_dumbbell, max_yaw_forearm, min_yaw_belt, min_yaw_dumbbell, min_yaw_forearm))
+#get indices for the columns in which 90% of rows miss data. 
+emptyCols <- which(missingness_byCol > dim(train)[1] * 0.9)  #this returns a numeric vector with indices for the largely empty columns. 
 
-#combine them together
-train_s <- cbind(train_s, train_o)
+#remove these empty columns
+train_s <- train[, - emptyCols]
+test_s <- test[, - emptyCols]
 
-#apply k-nearest neighbors imputation to empty data
-# ??? preObj <- preProcess(train_s, method = "knnImpute")
+```
+
+### Exclude columns that lack variability
+
+Some variables only have one or very few unique values relative to the number of samples. These variables won't be helpful for predicting the outcome and therefore should not be included in the model either. 
+
+```{r removeLowVar}
+#find the indices of columns that are near zero variability
+nzv <- nearZeroVar(train_s)
+
+#remove those columns
+train_s <- train_s[, -nzv]
+test_s <- test_s[, -nzv]
 
 ```
 
 
-## Cross Validation
+### Remove the first ID column to avoid interference with the algorithms
 
-The validation set was held out for the final prediction. Meanwhile the training set were split into training & test sets for cross validation. 
+```{r removeID}
+
+train_s <- train_s[, -1]
+test_s <- test_s[, -1]
+
+```
+
+## Predictive Modeling
+
+### Cross Validation
+We will set aside the test dataset, and use only the train dataset in this section.
+First we will partition the train dataset into a training set and a validation set for cross validation. 
 
 ```{r cv}
 
-
-# Create a validation set
-# use 80% of the original training data for training, the remaining 20% for validation
+# Create a validation set - use 70% of the original training data for training, the remaining 30% for validation
 set.seed(32323)
-train_index <- createDataPartition(train_s$classe, p = 0.8, list = FALSE)
-training <- train_s[train_index, ]
-validadtion <- train_s[-train_index, ] 
+train_index <- createDataPartition(train_s$classe, p = 0.7, list = FALSE)
+myTraining <- train_s[train_index, ]
+myValidadtion <- train_s[-train_index, ] 
+
+```
+
+We will also specify the method as cross validation and number of folds as 3 using trainControl().
+
+```{r fitcontrol}
+
+fitControl <- trainControl(method = 'cv', number = 3)
+
+```
+
+We will attempt several different ML algorithms to predict the class:
+- Decision Trees
+- Random Forest
+- Generalized Boosted Model
 
 
-#K-folds (Explore later)
-    #slice the training set into training & validation sets in 10 folds. 
-    # set.seed(32323)
-    # folds <- createFolds(y = train$classe, 
-    #                      k = 10,
-    #                      list = TRUE,
-    #                      returnTrain = TRUE)
-    # 
-    # # Create two lists to host the 10 folds of training and testing datasets. 
-    # training <- list()
-    # testing <- list()
-    # 
-    # for (i in 1:10) {
-    #     training[[i]] <- train[folds[[i]], ] #create a traing set for each fold
-    #     testing[[i]] <- train[-folds[[i]], ] #create a testing set for each fold
-    # }
+### Decision Trees 
+
+The accuracy of the decision trees model is about 0.628, which translates to an out-of-sample error of 0.372. 
+
+```{r decisiontrees}
+
+mod_dt <- train(classe ~ ., data = myTraining, method = "rpart", trControl = fitControl)
+
+# Plot
+# fancyRpartPlot(mod_dt$finalModel)
+
+# validate the model using validation dataset to evaluate the prediction accuracy
+pred_dt <- predict(mod_dt, newdata = myValidadtion)
+confusionMatrix(pred_dt, myValidadtion$classe)
+
+```
+
+### Random Forest
+
+The accuracy of the random forest model is about 0.628, which translates to an out-of-sample error of 0.372. 
+
+```{r rf}
+
+mod_rf <- train(classe ~ ., data = myTraining, method = "rf", trControl = fitControl)
+
+# validate the model using validation dataset to evaluate the prediction accuracy
+pred_rf <- predict(mod_rf, newdata = myValidadtion)
+confusionMatrix(pred_rf, myValidadtion$classe)
 
 ```
 
 
-## Model Selection
+### Generalized Boosted Model
 
-```{r modfit}
+The accuracy of the generalized boosted model is about 0.628, which translates to an out-of-sample error of 0.372. 
 
-m_rf <- train(classe ~ ., data = training, method = "rf")
+```{r gbm}
 
+mod_gbm <- train(classe ~ ., data = myTraining, method = "gbm", trControl = fitControl,  verbose=FALSE)
+
+# validate the model using validation dataset to evaluate the prediction accuracy
+pred_gbm <- predict(mod_gbm, newdata = myValidadtion)
+confusionMatrix(pred_gbm, myValidadtion$classe)
 
 ```
-
-
-
-
-## Out-of-Sample Error
 
 
 ## Prediction Results on Test set
 
+Among the three ML algorithms attempted, GBM had the highest accuracy and therefore was selected for predicting classe of the test set. 
+
 ```{r predicttest}
 
-predictions_test <- predict(finalModel, newdata = test)
+predictions_test <- predict(mod_gbm, newdata = test_s)
 
+predictions_test
 
 ```
