@@ -1,0 +1,148 @@
+---
+title: "Practical Machine Learning Class Assignment"
+author: "VXG"
+date: "4/24/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE)
+
+```
+
+
+```{r pkg}
+#load packages 
+library(caret)
+library(dplyr)
+library(ggplot2)
+library(rapportools)
+
+```
+
+## Reading Data
+
+The training data and test data are pulled from the Weight Lifting Exercises dataset from the publication cited below.
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+We will use this dataset to *predict how well the weight lifting exercise is performed* by the wearer based on activity data collected from the sensors placed on the *arm, forearm, belt, and dumbbell* of six healthy participants. The quality of exercise was classified into *five classes*:
+
+- Class A: exercising exactly according to the specification
+- Class B: throwing the elbows to the front
+- Class C: lifting the dumbbell only halfway
+- Class D: lowering the dumbbell only halfway
+- Class E: throwing the hips to the front
+
+```{r reading data}
+
+#check if train and validation exists, if not load it. 
+if (!exists("train", inherits = FALSE)) {
+    train <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+}
+
+if (!exists("test", inherits = FALSE)) {
+    test <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+}
+
+```
+
+Since the Caret algorithms require complete observations without NAs, we need to understand how much data are missing in each variable. 
+
+```{r cleaning data}
+
+# #check whehter NAs exist in each variable of the train data.
+# detect_NA <- lapply(train, is.na)
+# 
+# #count how many NAs there are in each variable of the train data
+# count_NA <- data.frame(sapply(detect_NA, sum))
+# 
+# #check whehter empty cells exist in each variable of the train data.
+# detect_empty <- lapply(train, is.empty)
+# 
+# #count how many NAs there are in each variable of the train data
+# count_empty <- data.frame(sapply(detect_empty, sum))
+# 
+# #merge both to evaluate the missingness. 
+# missingness <- merge(count_NA, count_empty, by = 0)
+
+```
+
+The missingness summary reveals the variables that include predominantly NAs and thus should be excluded from the modeling process, and the variables that needs imputation due to its partial missingness.
+
+```{r removeNA}
+
+#remove the groups of variables that are largely NAs.
+train_s <- select(train, -starts_with(c("amplitude_", "avg_", "max_", "min_", "stddev_", "var_")), -c("X", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp"))
+
+#a small number of variables from these groups are not NAs. We'd need to add them back. 
+train_o <- select(train, c(amplitude_yaw_belt, amplitude_yaw_dumbbell, amplitude_yaw_forearm, max_yaw_belt, max_yaw_dumbbell, max_yaw_forearm, min_yaw_belt, min_yaw_dumbbell, min_yaw_forearm))
+
+#combine them together
+train_s <- cbind(train_s, train_o)
+
+#apply k-nearest neighbors imputation to empty data
+# ??? preObj <- preProcess(train_s, method = "knnImpute")
+
+```
+
+
+## Cross Validation
+
+The validation set was held out for the final prediction. Meanwhile the training set were split into training & test sets for cross validation. 
+
+```{r cv}
+
+
+# Create a validation set
+# use 80% of the original training data for training, the remaining 20% for validation
+set.seed(32323)
+train_index <- createDataPartition(train_s$classe, p = 0.8, list = FALSE)
+training <- train_s[train_index, ]
+validadtion <- train_s[-train_index, ] 
+
+
+#K-folds (Explore later)
+    #slice the training set into training & validation sets in 10 folds. 
+    # set.seed(32323)
+    # folds <- createFolds(y = train$classe, 
+    #                      k = 10,
+    #                      list = TRUE,
+    #                      returnTrain = TRUE)
+    # 
+    # # Create two lists to host the 10 folds of training and testing datasets. 
+    # training <- list()
+    # testing <- list()
+    # 
+    # for (i in 1:10) {
+    #     training[[i]] <- train[folds[[i]], ] #create a traing set for each fold
+    #     testing[[i]] <- train[-folds[[i]], ] #create a testing set for each fold
+    # }
+
+```
+
+
+## Model Selection
+
+```{r modfit}
+
+m_rf <- train(classe ~ ., data = training, method = "rf")
+
+
+```
+
+
+
+
+## Out-of-Sample Error
+
+
+## Prediction Results on Test set
+
+```{r predicttest}
+
+predictions_test <- predict(finalModel, newdata = test)
+
+
+```
